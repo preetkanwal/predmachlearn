@@ -1,0 +1,103 @@
+---
+title: "Practical Machine Learning - Course Project"
+author: "Preet Kanwal"
+date: "25 October 2015"
+output: html_document
+---
+##Introduction
+As a part of the Machine Learning project, we are provided the data from accelerometers on the belt, forearm, arm, and dumbell of 6 research study participants. Our training data consists of accelerometer data and a label identifying the quality of the activity the participant did. Our testing data consists of accelerometer data without the outcome label. Our goal is to predict the labels for the test set observations.
+
+##Data Preparation
+Let's start by loading the data
+```{r, cache = TRUE}
+setwd("C:/Users/PreetKanwal/Desktop/Project")
+train <- read.csv("pml-training.csv", header = TRUE)
+test <- read.csv("pml-testing.csv", header = TRUE)
+```
+Loading the caret and rattle package
+```{r}
+library(caret)
+library(rattle)
+library(gridExtra)
+```
+There are 19,622 observations in the training set from which we are creating trainSubset with 60% of the original training data set and the remaining 40% to be used as the testSubset (before we compute results on the final testing set).
+```{r}
+set.seed(400)
+inTrain = createDataPartition(train$classe, p = .60)[[1]]
+trainSubset = train[ inTrain,]
+testSubset = train[-inTrain,]
+```
+
+Selecting the relevant set of features that make sense for prediction from the trainSubset. Removing features with nearly zero variance and variables that are almost NA. Applying the same rules to testSubset
+```{r, cache = TRUE}
+# remove variables with nearly zero variance
+nzv <- nearZeroVar(trainSubset)
+trainSubset <- trainSubset[, -nzv]
+testSubset <- testSubset[, -nzv]
+
+# remove variables that are almost always NA
+mostlyNA <- sapply(trainSubset, function(x) mean(is.na(x))) > 0.95
+trainSubset <- trainSubset[, mostlyNA==F]
+testSubset <- testSubset[, mostlyNA==F]
+
+# remove variables that don't make intuitive sense for prediction (X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp), which happen to be the first five variables
+trainSubset <- trainSubset[, -(1:5)]
+testSubset <- testSubset[, -(1:5)]
+```
+##Model Building
+###Recursive Partitioning and Regression Tree
+As the outcome is categorical, lets train a decision tree using rpart package
+```{r, cache=TRUE}
+set.seed(400)
+modFit<-train(classe~.,method="rpart", data=trainSubset)
+print(modFit$finalModel)
+fancyRpartPlot(modFit$finalModel, cex = .5, under.cex = 1, shadow.offset = 0)
+classePredict <- predict(modFit, testSubset)
+confusionMatrix(classePredict, testSubset$classe)
+```
+The outcomes are not as definitive as one would hope in viewing the plot. In testing this model on the testSubset, it is revealed to have a 53.2% accuracy, which is only slightly better than by chance alone. The variables used in the algorithm include roll_belt, pitch_forearm, num_window, magnet_dumbbell_Z and magnet_dumbell_x. The model is the least accurate for outcome class D.
+
+##Random Forest Model
+As the rpart model was largely inaccurate and the outcome variable appears to have more nuances in variable selection as demonstrated in the rpart tree, a random forest model was tested to see if that method fit the data more appropriately.
+
+```{r, cache=TRUE}
+set.seed(400)
+modFit2 <- train(classe ~ ., method="rf",trControl=trainControl(method = "cv", number = 4), data=trainSubset)
+print(modFit2)
+varImp(modFit2)
+classePredict2 <- predict(modFit2, testSubset)
+confusionMatrix(classePredict2, testSubset$classe)
+```
+The random forest model has a 99.7% accuracy (OUT OF SAMPLE ERROR), far superior to the rpart method. The specificity and sensitivity is in the high for all variables. The top seven variables of importance included num_window, roll_belt, pitch_forarm, yaw_belt, pitch_belt, magnet_dumbbell_z and magnet_dumbbell_y.
+
+##Re-training the Selected Model
+Before predicting on the test set, it is important to train the model on the full training set (train), rather than using a model trained on a reduced training set (trainSubset), in order to produce the most accurate predictions. Therefore, we will now repeat everything We did above on ptrain and ptest:
+
+```{r, cache = TRUE}
+# remove variables with nearly zero variance
+nzv <- nearZeroVar(train)
+train <- train[, -nzv]
+test <- test[, -nzv]
+
+# remove variables that are almost always NA
+mostlyNA <- sapply(train, function(x) mean(is.na(x))) > 0.95
+train <- train[, mostlyNA==F]
+test <- test[, mostlyNA==F]
+
+# remove variables that don't make intuitive sense for prediction (X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp), which happen to be the first five variables
+train <- train[, -(1:5)]
+test <- test[, -(1:5)]
+
+# re-fit model using full training set (ptrain)
+fitControl <- trainControl(method="cv", number=3, verboseIter=F)
+fit <- train(classe ~ ., data=train, method="rf", trControl=fitControl)
+```
+And when used on the original test data set which had 20 test cases, the submitted answer resulted in 100% correct predictions.
+```{r}
+testinganswers=predict(fit, newdata=test)
+print(testinganswers)
+```
+##Conclusion
+Random Forest was a superior model for prediction of exercise quality compared to rpart. The nominal categories were dependent on various variables and the interaction between them. The RF model had over 99% accuracy and fitted well to other subsamples of the data.
+
+Overall, it is interesting to consider how monitors are affected by the quality of an exercise and are able to predict the error made. This is an important indicator for health and fitness as it is not just the quantity of exercise that can be collected and analyzed but also the quality.
